@@ -6,6 +6,8 @@ from pytz import timezone
 from vit import util
 from vit import uda
 
+from .formatter import Formatter
+
 INDICATORS = [
     'active',
     'dependency',

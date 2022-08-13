@@ -7,7 +7,7 @@ class Description(String):
         if not description:
             return self.empty()
         width = len(description)
-        colorized_description = self.colorize_description(description)
+        colorized_description = self.colorize_description(description, task)
         if task['annotations']:
             annotation_width, colorized_description = self.format_combined(colorized_description, task)
             if annotation_width > width:
@@ -19,7 +19,8 @@ class Description(String):
 
     def format_combined(self, colorized_description, task):
         annotation_width, formatted_annotations = self.format_annotations(task)
-        return annotation_width, colorized_description + [(None, "\n"), (None, formatted_annotations)]
+        anno_color = None if task['status'] != 'completed' else self.colorizer.status('completed')
+        return annotation_width, colorized_description + [(None, "\n"), (anno_color, formatted_annotations)]
 
     def format_annotations(self, task):
         def reducer(accum, annotation):
@@ -39,10 +40,19 @@ class Description(String):
     def colorize(self, part):
         return self.colorizer.keyword(part)
 
-    def colorize_description(self, description):
+    def colorize_description(self, description, task):
+        # Force red coloring if the task is completed.
+        if task['status'] == 'completed':
+            color = self.colorizer.status('completed')
+            return [(color, description)]
+        elif task['start']:
+            color = self.colorizer.active(True)
+            return [(color, description)]
+
         first_part, rest = self.colorizer.extract_keyword_parts(description)
         if first_part is None:
             return [(None, description)]
+
         def reducer(accum, part):
             if part:
                 last_color, last_part = accum[-1]
