@@ -1,9 +1,10 @@
 import math
 from datetime import datetime
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:
-    from backports.zoneinfo import ZoneInfo
+# TODO: uncomment once Python 3.9 is available on knife
+#try:
+#    from zoneinfo import ZoneInfo
+#except ImportError:
+#    from backports.zoneinfo import ZoneInfo
 
 TIME_UNIT_MAP = {
     'seconds': {
@@ -201,7 +202,8 @@ class DateTime(Formatter):
     def iso(self, dt):
         if dt == None:
             return ''
-        dt = dt.replace(tzinfo=ZoneInfo('UTC'))
+        # TODO: uncomment once Python 3.9 is available on knife
+        #dt = dt.replace(tzinfo=ZoneInfo('UTC'))
         return dt.isoformat()
 
 class List(Formatter):

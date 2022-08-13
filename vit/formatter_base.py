@@ -1,9 +1,10 @@
 from importlib import import_module
 from datetime import datetime, timedelta
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:
-    from backports.zoneinfo import ZoneInfo
+# TODO: uncomment once Python 3.9 is available on knife
+#try:
+#    from zoneinfo import ZoneInfo
+#except ImportError:
+#    from backports.zoneinfo import ZoneInfo
 
 from vit import util
 from vit import uda
@@ -31,7 +32,8 @@ class FormatterBase(object):
         self.report = self.task_config.translate_date_markers(self.task_config.subtree('dateformat.report')) or self.date_default
         self.annotation = self.task_config.translate_date_markers(self.task_config.subtree('dateformat.annotation')) or self.date_default
         self.description_truncate_len = DEFAULT_DESCRIPTION_TRUNCATE_LEN
-        self.epoch_datetime = datetime(1970, 1, 1, tzinfo=ZoneInfo('UTC'))
+        # TODO: uncomment once Python 3.9 is available on knife
+        self.epoch_datetime = datetime(1970, 1, 1) # tzinfo=ZoneInfo('UTC'))
         self.due_days = int(self.task_config.subtree('due'))
         self.none_label = config.get('color', 'none_label')
         self.build_indicators()
