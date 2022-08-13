@@ -1,6 +1,9 @@
 import math
 from datetime import datetime
-from pytz import timezone
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
 
 TIME_UNIT_MAP = {
     'seconds': {
@@ -150,14 +153,14 @@ class DateTime(Formatter):
     def age(self, dt):
         if dt == None:
             return ''
-        now = datetime.now(self.formatter.zone)
+        now = datetime.now().astimezone()
         seconds = (now - dt).total_seconds()
         return self.format_duration_vague(seconds)
 
     def countdown(self, dt):
         if dt == None:
             return ''
-        now = datetime.now(self.formatter.zone)
+        now = datetime.now().astimezone()
         if dt < now:
             return ''
         seconds = (dt - now).total_seconds()
@@ -166,14 +169,14 @@ class DateTime(Formatter):
     def relative(self, dt):
         if dt == None:
             return ''
-        now = datetime.now(self.formatter.zone)
+        now = datetime.now().astimezone()
         seconds = (dt - now).total_seconds()
         return self.format_duration_vague(seconds)
 
     def remaining(self, dt):
         if dt == None:
             return ''
-        now = datetime.now(self.formatter.zone)
+        now = datetime.now().astimezone()
         if dt < now:
             return ''
         seconds = (dt - now).total_seconds()
@@ -198,7 +201,7 @@ class DateTime(Formatter):
     def iso(self, dt):
         if dt == None:
             return ''
-        dt = dt.replace(tzinfo=timezone('UTC'))
+        dt = dt.replace(tzinfo=ZoneInfo('UTC'))
         return dt.isoformat()
 
 class List(Formatter):

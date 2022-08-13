@@ -2,11 +2,17 @@
 
 ### Configuration
 
+#### VIT's configuration
+
 VIT provides a user directory that allows for configuring basic settings *(via ```config.ini```)*, as well as custom themes, formatters, and keybindings.
 
-By default, the directory is located at ```~/.vit```
+VIT searches for the user directory in this order of priority:
 
-To customize the location of the user directory, you can set the ```VIT_DIR``` environment variable.
+1. The ```VIT_DIR``` environment variable
+2. ```~/.vit``` (the default location)
+3. A ```vit``` directory in any valid [XDG base directory](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html)
+
+#### Taskwarrior configuration
 
 By default, VIT uses the default location of the Taskwarrior configuration file to read configuration from Taskwarrior.
 
@@ -134,3 +140,33 @@ your keybindings:
 Now, for example, to jump to a task whose ID is 42, you need to press `4`, `2`
 and `<Enter>`, instead of `:`, `4`, `2` and `<Enter>`.
 This saves a `:` keypress whenever jumping to a task.
+
+### Auto-refreshing VIT's interface
+
+*Note: Windows unfortunately does not support the `SIGUSR1` signal, so this feature is not currently available in that environment.*
+
+VIT was designed to be used in a request/response manner with the underlying TaskWarrior database, and by default its interface does not refresh when there are other changes happening outside of a specific VIT instance.
+
+However, VIT provides some basic mechanisms that, when combined, allow for an easy implementation of an auto-refreshing interface:
+
+* **Signal handling:** Sending the `SIGUSR1` signal to a VIT process will cause it to refresh its interface (the equivalent of the `{ACTION_REFRESH}` action keybinding
+* **PID management:** Configuring `pid_dir` in `config.ini` will cause VIT to manage PID files in `pid_dir`. Executing VIT with the `--list-pids` argument will output all current PIDs in `pid_dir` to standard output
+* **Instance environment variable:** VIT injects the `IS_VIT_INSTANCE` environment variable into the environment of the running process. As such, processes invoked in that environment have access to the variable
+
+#### Refresh all VIT instances example
+
+[vit-external-refresh.sh](scripts/vit-external-refresh.sh) provides an example leveraging signals to externally refresh all local VIT interfaces. To use, make sure:
+
+* The script is executable, and in your `PATH` environment variable
+* You've properly set `pid_dir` in `config.ini`
+
+#### Refresh VIT when TaskWarrior updates a task
+
+[on-exit-refresh-vit.sh](scripts/hooks/on-exit-refresh-vit.sh) provides an example TaskWarrior hook that will automatically refresh all local VIT interfaces when using Taskwarrior directly. To use, make sure:
+
+* The script is executable, [named properly](https://taskwarrior.org/docs/hooks.html), and placed in TaskWarrior's hooks directory, usually `.task/hooks`
+* [vit-external-refresh.sh](scripts/vit-external-refresh.sh) is configured correctly as above
+
+#### Other refresh scenarios
+
+The basic tools above can be used in other more complex scenarios, such as refreshing VIT's interface after an automated script updates one or more tasks. The implementation details will vary with the use case, and are left as an exercise for the user.

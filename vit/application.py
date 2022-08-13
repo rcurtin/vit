@@ -2,6 +2,8 @@
 
 from importlib import import_module
 
+import os
+import signal
 import subprocess
 # TODO: Use regex module for better PCRE support?
 #       https://bitbucket.org/mrabarnett/mrab-regex
@@ -19,7 +21,7 @@ from vit.formatter_base import FormatterBase
 from vit import event
 from vit.loader import Loader
 from vit.config_parser import ConfigParser, TaskParser
-from vit.util import clear_screen, string_to_args, is_mouse_event
+from vit.util import clear_screen, string_to_args, is_mouse_event, task_id_or_uuid_short
 from vit.process import Command
 from vit.task import TaskListModel
 from vit.autocomplete import AutoComplete
@@ -35,6 +37,7 @@ from vit.command_bar import CommandBar
 from vit.registry import ActionRegistry, RequestReply
 from vit.action_manager import ActionManagerRegistry
 from vit.denotation import DenotationPopupLauncher
+from vit.pid_manager import PidManager
 
 # NOTE: This entire class is a workaround for the fact that urwid catches the
 # 'ctrl l' keypress in its unhandled_input code, and prevents that from being
@@ -53,9 +56,12 @@ class MainFrame(urwid.Frame):
         self.action_manager_registrar = self.action_manager.get_registrar()
         self.action_manager_registrar.register('REFRESH', self.refresh)
 
+    def is_default_refresh_key(self, keys):
+        return keys == 'ctrl l'
+
     def keypress(self, size, key):
         keys = self.key_cache.get(key)
-        if self.action_manager_registrar.handled_action(keys):
+        if self.action_manager_registrar.handled_action(keys) and self.is_default_refresh_key(keys):
             # NOTE: Calling refresh directly here to avoid the
             # action-manager:action-executed event, which clobbers the load
             # time currently.
@@ -71,8 +77,31 @@ class Application():
         self.load_early_config()
         self.set_report()
         self.setup_main_loop()
+        self.setup_signal_listeners()
         self.refresh(False)
+        self.setup_pid()
         self.loop.run()
+
+    def setup_signal_listeners(self):
+        # Since not all platforms may have all signals, ensure they are
+        # supported before adding a handler.
+        if hasattr(signal, 'SIGUSR1'):
+            pipe = self.loop.watch_pipe(self.async_refresh)
+            def sigusr1_handler(signum, frame):
+                os.write(pipe, b'x')
+            signal.signal(signal.SIGUSR1, sigusr1_handler)
+        if hasattr(signal, 'SIGTERM'):
+            def sigterm_handler(signum, frame):
+                self.signal_quit("SIGTERM")
+            signal.signal(signal.SIGTERM, sigterm_handler)
+        if hasattr(signal, 'SIGINT'):
+            def sigint_handler(signum, frame):
+                self.signal_quit("SIGINT")
+            signal.signal(signal.SIGINT, sigint_handler)
+        if hasattr(signal, 'SIGQUIT'):
+            def sigquit_handler(signum, frame):
+                self.signal_quit("SIGQUIT")
+            signal.signal(signal.SIGQUIT, sigquit_handler)
 
     def load_early_config(self):
         self.config = ConfigParser(self.loader)
@@ -93,6 +122,13 @@ class Application():
             self.loop.screen.set_terminal_properties(colors=256)
         except:
             pass
+
+    def setup_pid(self):
+        self.pid_manager = PidManager(self.config)
+        self.pid_manager.setup()
+
+    def teardown_pid(self):
+        self.pid_manager.teardown()
 
     def set_active_context(self):
         self.context = self.task_config.get_active_context()
@@ -146,6 +182,10 @@ class Application():
         self.action_manager_registrar = self.action_manager.get_registrar()
         self.action_manager_registrar.register('QUIT', self.quit)
         self.action_manager_registrar.register('QUIT_WITH_CONFIRM', self.activate_command_bar_quit_with_confirm)
+        # NOTE: This is a no-op for the default refresh keybinding, which is
+        # handled by the MainFrame() class. It's included here in case the user
+        # assigns a non-default key to the REFRESH action.
+        self.action_manager_registrar.register('REFRESH', self.refresh)
         self.action_manager_registrar.register('TASK_ADD', self.activate_command_bar_add)
         self.action_manager_registrar.register('REPORT_FILTER', self.activate_command_bar_filter)
         self.action_manager_registrar.register('TASK_UNDO', self.task_undo)
@@ -356,7 +396,9 @@ class Application():
             elif len(args) > 0:
                 if op == 'add':
                     if self.execute_command(['task', 'add'] + args, capture_output=True, print_output=False, wait=self.wait, confirm=None, clear=False):
-                        self.activate_message_bar('Task added')
+                        task = self.task_get_latest()
+                        self.activate_message_bar('Task %s added' % task_id_or_uuid_short(task))
+                        self.focus_new_task(task)
                 elif op == 'modify':
                     # TODO: Will this break if user clicks another list item
                     # before hitting enter?
@@ -387,6 +429,10 @@ class Application():
         self.widget.focus_position = 'body'
         if 'uuid' in metadata:
             self.task_list.focus_by_task_uuid(metadata['uuid'], self.previous_focus_position)
+
+    def focus_new_task(self, task):
+        if self.config.get('vit', 'focus_on_add'):
+            self.task_list.focus_by_task_uuid(task['uuid'], self.previous_focus_position)
 
     def key_pressed(self, key):
         if is_mouse_event(key):
@@ -446,6 +492,12 @@ class Application():
                     kwargs['wait'] = False
                 else:
                     kwargs['wait'] = True
+                uuid, _ = self.get_focused_task()
+                if not uuid:
+                    uuid = ""
+                kwargs['custom_env'] = {
+                    "VIT_TASK_UUID": uuid,
+                }
                 self.execute_command(args, **kwargs)
             elif command.isdigit():
                 self.task_list.focus_by_task_id(int(command))
@@ -493,7 +545,8 @@ class Application():
             self.task_list.focus_position = new_focus
 
     def search_rows(self, term, start_index=0, reverse=False):
-        search_regex = re.compile(term, re.MULTILINE)
+        escaped_term = re.escape(term)
+        search_regex = re.compile(escaped_term, re.MULTILINE)
         rows = self.table.rows
         current_index = start_index
         last_index = len(rows) - 1
@@ -544,16 +597,21 @@ class Application():
             return False
 
     def get_focused_task(self):
-        if self.widget.focus_position == 'body':
-            try:
-                uuid = self.task_list.focus.uuid
-                task = self.model.get_task(uuid)
-                return uuid, task
-            except:
-                pass
+        try:
+            uuid = self.task_list.focus.uuid
+            task = self.model.get_task(uuid)
+            return uuid, task
+        except:
+            pass
         return False, False
 
+    def signal_quit(self, signal):
+        #import debug
+        #debug.file("VIT received %s signal, quitting" % signal)
+        self.quit()
+
     def quit(self):
+        self.teardown_pid()
         raise urwid.ExitMainLoop()
 
     def build_task_table(self):
@@ -645,8 +703,6 @@ class Application():
         self.command_bar.activate(caption, metadata, edit_text)
         self.widget.focus_position = 'footer'
 
-    def activate_command_bar_add(self):
-        self.activate_command_bar('add', 'Add: ')
 
     def activate_command_bar_filter(self):
         self.activate_command_bar('filter', 'Filter: ')
@@ -656,6 +712,13 @@ class Application():
 
     def task_sync(self):
         self.execute_command(['task', 'sync'])
+
+    def task_get_latest(self):
+        returncode, stdout, stderr = self.command.run(['task', '+LATEST', 'uuids'], capture_output=True)
+        if returncode == 0:
+            return self.model.get_task(stdout)
+        else:
+            raise RuntimeError("Error retrieving latest task UUID: %s" % stderr)
 
     def activate_command_bar_quit_with_confirm(self):
         if self.confirm:
@@ -691,6 +754,8 @@ class Application():
     def global_escape(self):
         self.denotation_pop_up.close_pop_up()
 
+    def activate_command_bar_add(self):
+        self.activate_command_bar('add', 'Add: ')
 
     def task_done(self, uuid):
         success, task = self.model.task_done(uuid)
@@ -740,7 +805,7 @@ class Application():
     def task_action_denotate(self):
         uuid, task = self.get_focused_task()
         if task and task['annotations']:
-                self.denotation_pop_up.open(task)
+            self.denotation_pop_up.open(task)
 
     def task_action_modify(self):
         uuid, _ = self.get_focused_task()
@@ -911,6 +976,9 @@ class Application():
         else:
             raise RuntimeError("Error retrieving completed tasks: %s" % stderr)
 
+    def async_refresh(self, _):
+        self.refresh()
+
     def refresh(self, load_early_config=True):
         self.bootstrap(load_early_config)
         self.build_main_widget()
@@ -930,7 +998,7 @@ class Application():
         self.task_config.get_projects()
         self.refresh_blocking_task_uuids()
         self.formatter.recalculate_due_datetimes()
-        context_filters = self.contexts[self.context]['filter'] if self.context else []
+        context_filters = self.contexts[self.context]['filter'] if self.context and self.reports[self.report].get('context', 1) else []
         try:
             self.model.update_report(self.report, context_filters=context_filters, extra_filters=self.extra_filters)
         except VitException as err:
