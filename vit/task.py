@@ -81,6 +81,17 @@ class TaskListModel(object):
             return task
         return False
 
+    def task_estimate(self, uuid, estimate):
+        task = self.get_task(uuid)
+        if task:
+            try:
+                est = float(estimate)
+                task['estimate'] = est
+                task.save()
+                return task
+            except ValueError:
+                pass
+
     def task_denotate(self, uuid, annotation):
         task = self.get_task(uuid)
         if task:
@@ -123,6 +134,23 @@ class TaskListModel(object):
             except Task.DeletedTask as e:
                 return False, e
         return False, None
+
+    def task_list_cycle(self, uuid):
+        task = self.get_task(uuid)
+        if task:
+            if task['list'] == '':
+                task['list'] = 'today'
+            elif task['list'] == 'today':
+                task['list'] = 'tomorrow'
+            elif task['list'] == 'tomorrow':
+                task['list'] = 'short-term'
+            elif task['list'] == 'short-term':
+                task['list'] = 'long-term'
+            elif task['list'] == 'long-term':
+                task['list'] = 'today'
+            task.save()
+            return task
+        return False
 
     def task_start_stop(self, uuid):
         task = self.get_task(uuid)

@@ -164,6 +164,8 @@ class Application():
         self.action_manager_registrar.register('TASK_DELETE', self.task_action_delete)
         self.action_manager_registrar.register('TASK_DENOTATE', self.task_action_denotate)
         self.action_manager_registrar.register('TASK_MODIFY', self.task_action_modify)
+        self.action_manager_registrar.register('TASK_LIST_CYCLE', self.task_action_list_cycle)
+        self.action_manager_registrar.register('TASK_ESTIMATE', self.task_action_estimate)
         self.action_manager_registrar.register('TASK_START_STOP', self.task_action_start_stop)
         self.action_manager_registrar.register('TASK_DONE', self.task_action_done)
         self.action_manager_registrar.register('TASK_PRIORITY', self.task_action_priority)
@@ -353,7 +355,7 @@ class Application():
                     self.activate_message_bar('Error switching context', 'error')
             elif len(args) > 0:
                 if op == 'add':
-                    if self.execute_command(['task', 'add'] + args, wait=self.wait):
+                    if self.execute_command(['task', 'add'] + args, capture_output=True, print_output=False, wait=self.wait, confirm=None, clear=False):
                         self.activate_message_bar('Task added')
                 elif op == 'modify':
                     # TODO: Will this break if user clicks another list item
@@ -366,6 +368,12 @@ class Application():
                         self.table.flash_focus()
                         self.update_report()
                         self.activate_message_bar('Annotated task %s' % self.model.task_id(task['uuid']))
+                elif op == 'estimate':
+                    task = self.model.task_estimate(metadata['uuid'], data['text'])
+                    if task:
+                        self.table.flash_focus()
+                        self.update_report()
+                        self.activate_message_bar('Estimated task %s' % self.model.task_id(task['uuid']))
                 elif op == 'tag':
                     task = self.model.task_tags(metadata['uuid'], args)
                     if task:
@@ -738,6 +746,19 @@ class Application():
         uuid, _ = self.get_focused_task()
         if uuid:
             self.activate_command_bar('modify', 'Modify: ', {'uuid': uuid})
+            self.task_list.focus_by_task_uuid(uuid, self.previous_focus_position)
+
+    def task_action_list_cycle(self):
+        uuid, _ = self.get_focused_task()
+        if uuid:
+            self.model.task_list_cycle(uuid)
+            self.update_report()
+            self.task_list.focus_by_task_uuid(uuid, self.previous_focus_position)
+
+    def task_action_estimate(self):
+        uuid, _ = self.get_focused_task()
+        if uuid:
+            self.activate_command_bar('estimate', 'Estimate: ', {'uuid': uuid})
             self.task_list.focus_by_task_uuid(uuid, self.previous_focus_position)
 
     def task_action_start_stop(self):
